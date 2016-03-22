@@ -7,66 +7,150 @@ import (
 	"sync"
 )
 
+var filePath = "./"
 var prefLock = new(sync.Mutex)
+var prefMap = make(map[string]*Preference)
+
+type Preference struct {
+	keyMap    map[string]interface{}
+	observers *observersMap
+	name      string
+	*sync.Mutex
+}
+
+type editor struct {
+	modified map[string]interface{}
+	pref     *Preference
+}
 
 type observer interface {
 	OnChanged(key string)
 }
 
-type Preference struct {
-	prefMap   map[string]interface{}
-	mutex     *sync.Mutex
-	observers []observer
+type observersMap struct {
+	m map[string]*set
+	*sync.Mutex
 }
 
-type editor struct {
-	modified map[string]interface{}
+func InitPath(path string) {
+	filePath = path
 }
 
-var instance *Preference
-
-func GetPrefernce() *Preference {
-	if instance == nil {
+func GetPrefernce(name string) *Preference {
+	if prefMap[name] == nil {
 		prefLock.Lock()
-		if instance == nil {
-			instance = new(Preference)
-			instance.prefMap = make(map[string]interface{})
-			instance.mutex = new(sync.Mutex)
-			bytes, _ := ioutil.ReadFile("sdcard/test.txt")
-			json.Unmarshal(bytes, &instance.prefMap)
-			instance.observers = make([]observer, 0)
+		if prefMap[name] == nil {
+			prefMap[name] = &Preference{keyMap: make(map[string]interface{}), observers: &observersMap{make(map[string]*set), &sync.Mutex{}},
+				name: name, Mutex: &sync.Mutex{}}
+			bytes, _ := ioutil.ReadFile(filePath + name + ".json")
+			json.Unmarshal(bytes, &prefMap[name].keyMap)
 		}
 		prefLock.Unlock()
 	}
-	return instance
+	return prefMap[name]
 }
 
 func (p *Preference) GetInt(key string) int {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
-	obj, _ := p.prefMap[key]
+	p.Lock()
+	defer p.Unlock()
+	obj, _ := p.keyMap[key]
 	value := reflect.ValueOf(obj)
-	if value.Kind() == reflect.Int {
+	switch value.Kind() {
+	case reflect.Int:
 		return int(value.Int())
+	case reflect.Float64:
+		return int(value.Float())
+	default:
+		return 0
 	}
-	return 0
 }
 
-func (p *Preference) RegisterObserver(o observer) {
-	p.observers = append(p.observers, o)
+func (p *Preference) GetFloat(key string) float64 {
+	p.Lock()
+	defer p.Unlock()
+	obj, _ := p.keyMap[key]
+	value := reflect.ValueOf(obj)
+	switch value.Kind() {
+	case reflect.Int:
+		return float64(value.Int())
+	case reflect.Float64:
+		return value.Float()
+	default:
+		return 0
+	}
 }
 
-func (p *Preference) UnregisterObserver(o observer) {
+func (p *Preference) GetBool(key string) bool {
+	p.Lock()
+	defer p.Unlock()
+	obj, _ := p.keyMap[key]
+	value := reflect.ValueOf(obj)
+	switch value.Kind() {
+	case reflect.Bool:
+		return value.Bool()
+	default:
+		return false
+	}
+}
 
+func (p *Preference) GetString(key string) string {
+	p.Lock()
+	defer p.Unlock()
+	obj, _ := p.keyMap[key]
+	value := reflect.ValueOf(obj)
+	switch value.Kind() {
+	case reflect.String:
+		return value.String()
+	default:
+		return ""
+	}
+}
+
+func (p *Preference) RegisterPrefObserver(key string, s observer) {
+	p.observers.registerPrefObserver(key, s)
+}
+
+func (p *Preference) UnregisterPrefObserver(key string, s observer) {
+	p.observers.unregisterPrefObserver(key, s)
+}
+
+func (m *observersMap) registerPrefObserver(key string, s observer) {
+	m.Lock()
+	defer m.Unlock()
+
+	if _, ok := m.m[key]; !ok {
+		m.m[key] = newSet()
+	}
+	m.m[key].add(s)
+}
+
+func (m *observersMap) unregisterPrefObserver(key string, s observer) {
+	if os, ok := m.m[key]; ok {
+		os.remove(s)
+	}
 }
 
 func (p *Preference) Edit() *editor {
-	editor := new(editor)
-	editor.modified = make(map[string]interface{})
+	editor := &editor{modified: make(map[string]interface{}), pref: p}
 	return editor
 }
 
 func (e *editor) PutInt(key string, value int) *editor {
+	e.modified[key] = value
+	return e
+}
+
+func (e *editor) PutFloat(key string, value float64) *editor {
+	e.modified[key] = value
+	return e
+}
+
+func (e *editor) PutBool(key string, value bool) *editor {
+	e.modified[key] = value
+	return e
+}
+
+func (e *editor) PutString(key string, value string) *editor {
 	e.modified[key] = value
 	return e
 }
@@ -87,21 +171,24 @@ func (e *editor) Commit() {
 }
 
 func (e *editor) commitToMemory() {
-	instance.mutex.Lock()
+	e.pref.Lock()
+	defer e.pref.Unlock()
 	for k, v := range e.modified {
 		if v == nil {
-			delete(instance.prefMap, k)
+			delete(e.pref.keyMap, k)
 		} else {
-			instance.prefMap[k] = v
+			e.pref.keyMap[k] = v
 		}
-		for _, observer := range instance.observers {
-			observer.OnChanged(k)
+		set := e.pref.observers.m[k]
+		if set != nil {
+			for _, observer := range set.list() {
+				observer.OnChanged(k)
+			}
 		}
 	}
-	instance.mutex.Unlock()
 }
 
 func (e *editor) commitToDisk() {
-	bytes, _ := json.Marshal(instance.prefMap)
-	ioutil.WriteFile("sdcard/test.txt", bytes, 0644)
+	bytes, _ := json.Marshal(e.pref.keyMap)
+	ioutil.WriteFile(filePath+e.pref.name+".json", bytes, 0644)
 }
