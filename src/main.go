@@ -2,26 +2,33 @@ package main
 
 import (
 	"fmt"
+	"time"
 )
 
-type test struct{}
+func main() {
 
-func (o *test) OnChanged(key string) {
-	fmt.Println("on changed ", key)
+	for i := 0; i < 30; i++ {
+		TestReadWrite()
+	}
+	go TestChannel()
+	time.Sleep(1)
+
 }
 
-func main() {
-	fmt.Println("hello")
-	p := GetPrefernce("qq")
-	// t := new(test)
-	p.Edit().PutString("key", "3.5").Commit()
-	fmt.Println("test get ", p.GetString("key"))
-	p.Edit().PutString("key2", "3").Commit()
-	fmt.Println("test get2 ", p.GetString("key2"))
+func TestReadWrite() {
+	p := GetPreference("pref1")
+	p.Edit().PutInt("key1", 3).PutString("key2", "hello").PutFloat("key3", 0.5).PutBool("key4", true).Commit()
+	fmt.Printf("Get key1=%d key2=%s key3=%f key4=%v\n", p.GetInt("key1"), p.GetString("key2"), p.GetFloat("key3"), p.GetBool("key4"))
+	fmt.Printf("Get key5=%v key4=%s key7=%f key8=%v\n", p.GetInt("key5"), p.GetString("key6"), p.GetFloat("key7"), p.GetBool("key8"))
+}
 
-	// p = GetPrefernce("orz")
-	// // p.Edit().PutInt("ccc", 6).Commit()
-	// fmt.Println("test get ", p.GetInt("ccc"))
-	// // p.Edit().PutInt("ooo", 7).Commit()
-	// fmt.Println("test get2 ", p.GetInt("ooo"))
+func TestChannel() {
+
+	// key := <-channel
+	// fmt.Println("test get channel ", key)
+	// p := GetPreference("pref1")
+	// for {
+	// 	key := <-p.channel
+	// 	fmt.Println("receive ", key)
+	// }
 }

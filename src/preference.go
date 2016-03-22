@@ -12,9 +12,9 @@ var prefLock = new(sync.Mutex)
 var prefMap = make(map[string]*Preference)
 
 type Preference struct {
-	keyMap    map[string]interface{}
-	observers *observersMap
-	name      string
+	keyMap  map[string]interface{}
+	name    string
+	channel chan string
 	*sync.Mutex
 }
 
@@ -23,25 +23,15 @@ type editor struct {
 	pref     *Preference
 }
 
-type observer interface {
-	OnChanged(key string)
-}
-
-type observersMap struct {
-	m map[string]*set
-	*sync.Mutex
-}
-
 func InitPath(path string) {
 	filePath = path
 }
 
-func GetPrefernce(name string) *Preference {
+func GetPreference(name string) *Preference {
 	if prefMap[name] == nil {
 		prefLock.Lock()
 		if prefMap[name] == nil {
-			prefMap[name] = &Preference{keyMap: make(map[string]interface{}), observers: &observersMap{make(map[string]*set), &sync.Mutex{}},
-				name: name, Mutex: &sync.Mutex{}}
+			prefMap[name] = &Preference{keyMap: make(map[string]interface{}), name: name, channel: make(chan string, 4), Mutex: &sync.Mutex{}}
 			bytes, _ := ioutil.ReadFile(filePath + name + ".json")
 			json.Unmarshal(bytes, &prefMap[name].keyMap)
 		}
@@ -106,30 +96,6 @@ func (p *Preference) GetString(key string) string {
 	}
 }
 
-func (p *Preference) RegisterPrefObserver(key string, s observer) {
-	p.observers.registerPrefObserver(key, s)
-}
-
-func (p *Preference) UnregisterPrefObserver(key string, s observer) {
-	p.observers.unregisterPrefObserver(key, s)
-}
-
-func (m *observersMap) registerPrefObserver(key string, s observer) {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, ok := m.m[key]; !ok {
-		m.m[key] = newSet()
-	}
-	m.m[key].add(s)
-}
-
-func (m *observersMap) unregisterPrefObserver(key string, s observer) {
-	if os, ok := m.m[key]; ok {
-		os.remove(s)
-	}
-}
-
 func (p *Preference) Edit() *editor {
 	editor := &editor{modified: make(map[string]interface{}), pref: p}
 	return editor
@@ -179,12 +145,13 @@ func (e *editor) commitToMemory() {
 		} else {
 			e.pref.keyMap[k] = v
 		}
-		set := e.pref.observers.m[k]
-		if set != nil {
-			for _, observer := range set.list() {
-				observer.OnChanged(k)
+		go func(key string) {
+			// try push changed keys to channel and not block the go routine
+			select {
+			case e.pref.channel <- key:
+			default:
 			}
-		}
+		}(k)
 	}
 }
 
