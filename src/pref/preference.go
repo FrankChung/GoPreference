@@ -2,33 +2,35 @@ package pref
 
 import (
 	"encoding/gob"
+	"github.com/deckarep/golang-set"
 	"os"
 	"sync"
 )
 
-const channelSize = 4
-
 var (
+	// basePath indicates the path of where the Preferences files is stored.
 	basePath = "./"
+	// prefLock is used for synchronization of creating a Preferences.
 	prefLock = new(sync.Mutex)
-	prefMap  = make(map[string]*Preference)
+	// prefMap keeps a map of Preferencess with their name as key.
+	prefMap = make(map[string]*Preferences)
 )
 
-// Preference is a basic struct for store/access data to/from memory and storage.
-type Preference struct {
-	keyMap  map[string]interface{}
-	name    string
-	Channel chan string
+// Preferences is a basic struct for store/access data to/from memory and storage.
+type Preferences struct {
+	keyMap    map[string]interface{}
+	name      string
+	observers mapset.Set
 	*sync.Mutex
 }
 
-// Editor is a modifier of Preference.
+// Editor is a modifier of Preferences.
 type Editor struct {
 	modified map[string]interface{}
-	pref     *Preference
+	pref     *Preferences
 }
 
-// InitBasePath should be called before GetPreference to initialize the default storage path.
+// InitBasePath should be called before GetPreferences to initialize the default storage path.
 func InitBasePath(path string) {
 	basePath = path
 }
@@ -38,16 +40,16 @@ func RegisterCustomType(value interface{}) {
 	gob.Register(value)
 }
 
-// GetPreference gets or creates an instance of Preference with a given name.
-func GetPreference(name string) *Preference {
+// GetPreferences gets or creates an instance of Preferences with a given name.
+func GetPreferences(name string) *Preferences {
 	if _, exist := prefMap[name]; !exist {
 		prefLock.Lock()
 		if _, exist := prefMap[name]; !exist {
-			prefMap[name] = &Preference{
-				keyMap:  make(map[string]interface{}),
-				name:    name,
-				Channel: make(chan string, channelSize),
-				Mutex:   &sync.Mutex{}}
+			prefMap[name] = &Preferences{
+				keyMap:    make(map[string]interface{}),
+				name:      name,
+				observers: mapset.NewSet(),
+				Mutex:     &sync.Mutex{}}
 			if file, err := os.Open(basePath + name); err == nil {
 				dec := gob.NewDecoder(file)
 				dec.Decode(&prefMap[name].keyMap)
@@ -59,13 +61,27 @@ func GetPreference(name string) *Preference {
 	return prefMap[name]
 }
 
+// RegisterObserver registers a channel for listening the changes of a preference.
+func (p *Preferences) RegisterObserver(observer chan string) {
+	if observer != nil {
+		p.observers.Add(observer)
+	}
+}
+
+// UnregisterObserver unregisters a channel, and caller needs to close the channel after unregister.
+func (p *Preferences) UnregisterObserver(observer chan string) {
+	if observer != nil {
+		p.observers.Remove(observer)
+	}
+}
+
 // GetInt returns the int value from memory.
-func (p *Preference) GetInt(key string) int {
+func (p *Preferences) GetInt(key string) int {
 	return p.GetIntOrDefault(key, 0)
 }
 
 // GetIntOrDefault returns the int value from memory, and return default value if the key has not been set.
-func (p *Preference) GetIntOrDefault(key string, defaultValue int) int {
+func (p *Preferences) GetIntOrDefault(key string, defaultValue int) int {
 	p.Lock()
 	defer p.Unlock()
 	obj, exist := p.keyMap[key]
@@ -76,12 +92,12 @@ func (p *Preference) GetIntOrDefault(key string, defaultValue int) int {
 }
 
 // GetFloat returns the float value from memory.
-func (p *Preference) GetFloat(key string) float64 {
+func (p *Preferences) GetFloat(key string) float64 {
 	return p.GetFloatOrDefault(key, 0)
 }
 
 // GetFloatOrDefault returns the float value from memory, and return default value if the key has not been set.
-func (p *Preference) GetFloatOrDefault(key string, defaultValue float64) float64 {
+func (p *Preferences) GetFloatOrDefault(key string, defaultValue float64) float64 {
 	p.Lock()
 	defer p.Unlock()
 	obj, exist := p.keyMap[key]
@@ -92,12 +108,12 @@ func (p *Preference) GetFloatOrDefault(key string, defaultValue float64) float64
 }
 
 // GetBool returns the bool value from memory.
-func (p *Preference) GetBool(key string) bool {
+func (p *Preferences) GetBool(key string) bool {
 	return p.GetBoolOrDefault(key, false)
 }
 
 // GetBoolOrDefault returns the bool value from memory, and return default value if the key has not been set.
-func (p *Preference) GetBoolOrDefault(key string, defaultValue bool) bool {
+func (p *Preferences) GetBoolOrDefault(key string, defaultValue bool) bool {
 	p.Lock()
 	defer p.Unlock()
 	obj, exist := p.keyMap[key]
@@ -108,12 +124,12 @@ func (p *Preference) GetBoolOrDefault(key string, defaultValue bool) bool {
 }
 
 // GetString returns the string value from memory.
-func (p *Preference) GetString(key string) string {
+func (p *Preferences) GetString(key string) string {
 	return p.GetStringOrDefault(key, "")
 }
 
 // GetStringOrDefault returns the string value from memory, and return default value if the key has not been set.
-func (p *Preference) GetStringOrDefault(key string, defaultValue string) string {
+func (p *Preferences) GetStringOrDefault(key string, defaultValue string) string {
 	p.Lock()
 	defer p.Unlock()
 	obj, exist := p.keyMap[key]
@@ -124,12 +140,12 @@ func (p *Preference) GetStringOrDefault(key string, defaultValue string) string 
 }
 
 // GetObject returns the object value from memory.
-func (p *Preference) GetObject(key string) interface{} {
+func (p *Preferences) GetObject(key string) interface{} {
 	return p.GetObjectOrDefault(key, nil)
 }
 
 // GetObjectOrDefault returns the object value from memory, and return default value if the key has not been set.
-func (p *Preference) GetObjectOrDefault(key string, defaultValue interface{}) interface{} {
+func (p *Preferences) GetObjectOrDefault(key string, defaultValue interface{}) interface{} {
 	p.Lock()
 	defer p.Unlock()
 	obj, exist := p.keyMap[key]
@@ -139,8 +155,8 @@ func (p *Preference) GetObjectOrDefault(key string, defaultValue interface{}) in
 	return obj
 }
 
-// Edit creates an editor to modify the value of preference.
-func (p *Preference) Edit() *Editor {
+// Edit creates an editor to modify the value of Preferences.
+func (p *Preferences) Edit() *Editor {
 	return &Editor{modified: make(map[string]interface{}), pref: p}
 }
 
@@ -168,6 +184,7 @@ func (e *Editor) PutString(key string, value string) *Editor {
 	return e
 }
 
+// PutObject sets the modified object value in editor.
 func (e *Editor) PutObject(key string, value interface{}) *Editor {
 	e.modified[key] = value
 	return e
@@ -198,14 +215,21 @@ func (e *Editor) Commit() {
 func (e *Editor) commitToMemory() {
 	for k, v := range e.modified {
 		if v == nil {
-			// A nil value in modified map indicates the preference shall be removed.
+			// A nil value in modified map indicates the Preferences shall be removed.
 			delete(e.pref.keyMap, k)
 		} else {
 			e.pref.keyMap[k] = v
 		}
-		// Try push changed keys to channel and not block the go routine
+		e.pref.tryNotify(k)
+	}
+}
+
+func (p *Preferences) tryNotify(key string) {
+	// Recover if caller close the channel before unregister it.
+	defer func() { recover() }()
+	for ob := range p.observers.Iter() {
 		select {
-		case e.pref.Channel <- k:
+		case ob.(chan string) <- key:
 		default:
 		}
 	}

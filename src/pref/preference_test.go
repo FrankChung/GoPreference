@@ -5,9 +5,10 @@ import (
 	"testing"
 )
 
-func TestGetPreference(t *testing.T) {
-	assert.Equal(t, len(prefMap), 0)
-	GetPreference("path1")
+func TestGetSharedPreference(t *testing.T) {
+	assert.Empty(t, prefMap)
+	GetSharedPreference("path1")
 	assert.Equal(t, len(prefMap), 1)
 	assert.Equal(t, prefMap["path1"].path, "path1")
+	assert.Equal(t, len(prefMap["path1"].keyMap), 0)
 }
