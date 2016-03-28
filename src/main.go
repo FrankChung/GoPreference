@@ -1,23 +1,47 @@
 package main
 
 import (
+	// "encoding/gob"
 	"fmt"
 	"pref"
 	"time"
 )
 
+type Orz struct {
+	str string
+}
+
+// func (o *Orz) call() {
+// 	o.str = "123"
+// }
+
+func (o Orz) call() {
+
+}
+
+type Qo interface {
+	call()
+}
+
 func main() {
+	orz := new(Orz)
+	orz.str = "qq"
+	fmt.Println("before ", orz)
 
-	pref.RegisterCustomType(new(Test))
-	go TestChannel()
-	for i := 0; i < 10; i++ {
-		TestReadWrite()
-	}
+	var cc interface{} = *orz
+	cc.call()
+	fmt.Println("assign ", cc, orz)
 
-	// for i := 0; i < 3; i++ {
-	// 	TestReadWrite()
+	// gob.Register(new(Test))
+	// go TestChannel()
+	// for i := 0; i < 10; i++ {
+	// 	TestReadWrite(i)
 	// }
-	time.Sleep(100)
+
+	// // for i := 0; i < 3; i++ {
+	// // 	TestReadWrite()
+	// // }
+	// time.Sleep(1000000)
 }
 
 type Test struct {
@@ -25,27 +49,27 @@ type Test struct {
 	Qq    int
 }
 
-func TestReadWrite() {
+func TestReadWrite(i int) {
 	t := new(Test)
 	t.Hello = "hello"
 	t.Qq = 4243
+	time.Sleep(10000)
 
-	p := pref.GetPreferences("pref1")
-	p.Edit().PutInt("key1", 3).PutString("key2", "hello").PutFloat("key3", 0.5).PutBool("key4", true).PutObject("obj", t).Commit()
-	fmt.Printf("Get key1=%d key2=%s key3=%f key4=%v obj=%v\n", p.GetInt("key1"), p.GetString("key2"), p.GetFloat("key3"), p.GetBool("key4"), p.GetObject("obj"))
-	fmt.Printf("Get key5=%v key4=%s key7=%f key8=%v key9=%v\n", p.GetIntOrDefault("key5", 6), p.GetString("key6"), p.GetFloat("key7"), p.GetBool("key8"), p.GetObject("key9"))
+	p := pref.NewPreferences("pref1")
+	p.Edit().Put("key1", i).Put("key2", "hello").Put("key3", 0.5).Put("key4", true).Put("obj", t).Apply()
+	fmt.Printf("Get key1=%d key2=%s key3=%f key4=%v obj=%v\n", p.GetInt("key1", 0), p.GetString("key2", ""), p.GetFloat64("key3", 0), p.GetBool("key4", false), p.GetObject("obj", nil))
+	fmt.Printf("Get key5=%v key4=%s key7=%f key8=%v key9=%v\n", p.GetInt("key5", 0), p.GetString("key6", ""), p.GetFloat64("key7", 0), p.GetBool("key8", false), p.GetObject("key9", nil))
 }
 
 func TestChannel() {
-
 	ch := make(chan string, 10)
-	p := pref.GetPreferences("pref1")
-	p.RegisterObserver(ch)
+	p := pref.NewPreferences("pref1")
+	p.RegisterOnPreferenceChangeListener(ch)
 	for i := 0; i < 15; i++ {
 		key := <-ch
 		fmt.Println("receive ", key)
 	}
-	p.UnregisterObserver(ch)
+	p.UnregisterOnPreferenceChangeListener(ch)
 	for i := 0; i < 15; i++ {
 		key := <-ch
 		fmt.Println("receive2 ", key)
